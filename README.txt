@@ -30,9 +30,7 @@ For Product Weights, SKU and Weight values are pulled in and sent to a CSV file 
 
 HOW TO USE PRICE MISMATCHES:
 
-1. When prompted, enter the password to the SQL database.
-
-2. Allow script to run to completion then open the resulting PriceMismatches.csv file. This file is sorted by SKU but I recommend adding a filter and sorting the price difference column to allow you to cherry pick what data you wish to see.
+1. Allow script to run to completion then open the resulting PriceMismatches.csv file. This file is sorted by SKU but I recommend adding a filter and sorting the price difference column to allow you to cherry pick what data you wish to see.
 
 NOTE: This tool is not perfect at all and mismatches can falsely appear several ways:
 
@@ -56,6 +54,21 @@ HOW TO USE PRODUCT WEIGHT:
 
 3. This data will update in BigCommerce as you update the weights so if you run this option following updating a batch of items, your CSV file should be smaller now that those products do not appear in the CSV file.
 
+
+HOW TO USE INACTIVITY CHECKER:
+
+1. Allow the script to run then open the InactiveProducts.csv file that generates.
+
+2. Anything in this spreadsheet is one of two categories of products in BigCommerce:
+
+	a. A product that correlates to an Inactive product in Celerant
+	
+	b. A product that correlates to a product in Celerant that COULD be made Inactive but is still Active.
+	
+3. A flag is included in the spreadsheet called "Inactive" that indicates if a product is inactive in Celerant. If you only want to deal with those products, you can just use a filter or sort and pick those products.
+
+4. It should be noted I am not entirely confident in the completeness of any query we get from GraphQL given my attempt at a robust dataset from the Price Mismatches function. The collection of data may actually be fine since I am not trying to pull variant-level info which is where I had problems under Price Mismatches. Just keep in mind you're always able to just look at what the tool outputs as total SKUs processed and compare that against what BigCommerce says our product total is. Whatever that difference is is how many products didn't get picked up by the GraphQL query.
+
 HOW TO RUN:
 Right-click BigCommerceAudit.ps1 and select "Run with PowerShell"
 
@@ -67,5 +80,11 @@ HOW TO INSTALL MODULES:
 Open PowerShell by searching for it with the Start menu or shift + right-click the whitespace of any folder's window and click "Open PowerShell window here"
 Copy and paste the Install-Module commands into PowerShell. If the modules are already installed, they will be ignored.
 
-TODO:
-	Add Inactivity Checker (Read in all BigCommerce products and match them with Celerant entries. If 0 OH and of a certain Season (DISCO, NSTOCK), output to file)
+HOW TO UPDATE GRAPHQL CREDENTIALS:
+When a tool needs to query BigCommerce's data, it needs to do it via a GraphQL query which requires an Authorization token that comes from BigCommerce. It expires around once per week meaning there is a decent chance you will need to obtain that token if you are running this tool. To get that token, go to the following location in BigCommerce: 
+
+Settings -> Storefront API Playground
+
+In the page that opens, look near the bottom under a "Headers" tab. Find the "Authorization" text and look for a block of text immediately after it that starts with "Bearer ..."
+
+The string of text starts AFTER the "Bearer" text is the GraphQL token. Copy that and paste it in the config.json value under the BigCommerce -> Token field. The existing value should already look pretty close to the token you have so use that to verify you have the right information.

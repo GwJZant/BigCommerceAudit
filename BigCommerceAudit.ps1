@@ -9,6 +9,16 @@ if (Test-Path $configFile) {
     exit
 }
 
+# Output filename formatting
+# Check if the folder exists; if not, create it
+if (-not (Test-Path -Path "$PSScriptRoot\Output")) {
+    # -Force ensures it creates the entire tree if multiple levels are missing
+    New-Item -ItemType Directory -Path "$PSScriptRoot\Output" -Force | Out-Null
+}
+
+$timestamp = Get-Date -Format "yyyy-MM-dd_HHmm"
+$outputFolderPath = "$PSScriptRoot\Output\"
+
 # Setup API Credentials
 $token = $config.BigCommerce.Token
 $url   = $config.BigCommerce.GraphQLEndpoint
@@ -79,7 +89,6 @@ if ($selection -eq "1") {
 			if ($p.sku) {
 				if ($p.inventory.isInStock) {
 					$allBcPrices[$p.sku] = [decimal]$($p.prices.price.value)
-					# Write-Host "SKU: $($p.sku) Price: $($p.prices.price.value)"
 				} else {
 					# Write-Host "SKU: $($p.sku) NOT in stock."
 				}			
@@ -133,7 +142,7 @@ if ($selection -eq "1") {
 			$dept        = $row.Dept
 			
 			if ($allBcPrices.ContainsKey($sku)) {
-				# Write-Host "Match found for $($sku)! BigCommerce Price: $bcPrice Celerant Price: $posPrice"
+				
 				$foundInBC++
 				
 				if (($allBcPrices[$sku] -ne $posPrice) -and ($dept -notlike "*FOOD*")) {
@@ -157,8 +166,8 @@ if ($selection -eq "1") {
 		Write-Host "SKUs in POS but missing in BC: $notFoundInBC"
 		
 		if ($mismatches.Count -gt 0) {
-			$mismatches | Sort-Object SKU | Export-Csv -Path ".\PriceMismatches.csv" -NoTypeInformation
-			Write-Host "Results exported to PriceMismatches.csv" -ForegroundColor Yellow
+			$mismatches | Sort-Object SKU | Export-Csv -Path $outputFolderPath + "PriceMismatches.csv" -NoTypeInformation
+			Write-Host "Results exported to Output\PriceMismatches.csv" -ForegroundColor Yellow
 		}
 	} catch {
 		Write-Host "SQL Error: $_" -ForegroundColor DarkRed
@@ -215,6 +224,7 @@ if ($selection -eq "1") {
 			$p = $productEdge.node
 			$productCount++
 			
+			# Only audit products we have in stock
 			if ($p.availability -eq "Available") {
 				if ($p.inventory.isInStock) {
 					$allBcWeights += [PSCustomObject]@{
@@ -225,7 +235,6 @@ if ($selection -eq "1") {
 						weightValue = $p.weight.value
 						inStock     = $p.inventory.isInStock
 					}
-					# Write-Host "SKU: $($p.sku) Price: $($p.prices.price.value)"
 				} else {
 					# Write-Host "SKU: $($p.sku) NOT in stock."
 				}		
@@ -245,8 +254,8 @@ if ($selection -eq "1") {
 	Write-Host "`nAudit Complete!" -ForegroundColor Green
 	Write-Host "Products Found: $($allBcWeights.Count)"
 		
-	$allBcWeights | Where-Object {$_.weightValue -lt 1 } | Sort-Object SKU | Export-Csv -Path ".\ProductWeights.csv" -NoTypeInformation
-	Write-Host "Results exported to ProductWeights.csv" -ForegroundColor Yellow
+	$allBcWeights | Where-Object {$_.weightValue -lt 1 } | Sort-Object SKU | Export-Csv -Path $outputFolderPath + "ProductWeights.csv" -NoTypeInformation
+	Write-Host "Results exported to Output\ProductWeights.csv" -ForegroundColor Yellow
 } elseif ($selection -eq "3") {
 	$allBcProducts   = @{} # hash table of products, key is product code; value is inactive
 	$sqlFilePath = "$PSScriptRoot\Queries\GetInactiveCelerantProducts.sql"
@@ -258,7 +267,7 @@ if ($selection -eq "1") {
 		$after = if ($endCursor) { "after: `"$endCursor`"" } else { "" }
 		
 		# 2. Define the GraphQL Query
-		# This asks for 50 products, their SKU, and their current price
+		# This asks for 50 products and their SKU
 		$graphQuery = @{
 			query = "query {
 				site {
@@ -286,8 +295,6 @@ if ($selection -eq "1") {
 
 		$response = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $graphQuery
 		
-		# Write-Host "Debug: hasNextPage = $($response.data.site.products.pageInfo.hasNextPage) | Cursor = $($response.data.site.products.pageInfo.endCursor)"
-
 		# Drill down into the data
 		$bcProducts = $response.data.site.products.edges
 
@@ -351,7 +358,6 @@ if ($selection -eq "1") {
 			}
 			
 			if ($allBcProducts.ContainsKey($style)) {
-				# Write-Host "Match found for $($style)! BigCommerce Price: $bcPrice Celerant Price: $posPrice"
 				$foundInBC++
 				
 				$allBcProducts[$style].Inactive = $true
@@ -365,8 +371,8 @@ if ($selection -eq "1") {
 		Write-Host "SKUs in POS but missing in BC: $notFoundInBC"
 		
 		if ($allBcProducts.Count -gt 0) {
-			$allBcProducts.Values | Where-Object { $_.Inactive -eq $true } | Sort-Object SKU | Export-Csv -Path ".\BigCommerceInactiveProducts.csv" -NoTypeInformation
-			Write-Host "Results exported to BigCommerceInactiveProducts.csv" -ForegroundColor Yellow
+			$allBcProducts.Values | Where-Object { $_.Inactive -eq $true } | Sort-Object SKU | Export-Csv -Path $outputFolderPath + "InactiveProducts.csv" -NoTypeInformation
+			Write-Host "Results exported to Output\InactiveProducts.csv" -ForegroundColor Yellow
 		}
 	} catch {
 		Write-Host "SQL Error: $_" -ForegroundColor DarkRed
