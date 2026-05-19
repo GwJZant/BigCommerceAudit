@@ -3,3 +3,6 @@ PriceMismatches.csv
 config.json
 ProductWeights.csv
 BigCommerceInactiveProducts.csv
+Output/
+Input/*.txt
+!Input/BigCommerceProductsSample.txt

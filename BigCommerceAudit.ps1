@@ -32,13 +32,14 @@ Write-Host "What do you want to audit?" -ForegroundColor Cyan
 Write-Host "1. Price Mismatches" -ForegroundColor Cyan
 Write-Host "2. Product Weights" -ForegroundColor Cyan
 Write-Host "3. Inactivity Checker" -ForegroundColor Cyan
-Write-Host "4. Exit" -ForegroundColor Cyan
+Write-Host "4. Missing Products" -ForegroundColor Cyan
+Write-Host "5. Exit" -ForegroundColor Cyan
 $selection = Read-Host "Enter your selection"
 
 if ($selection -eq "1") {
 	$allBcPrices    = @{} # A 'Hash Table' to store SKU => Price for fast lookup
 	
-	Write-Host "Fetching all products from BigCommerce (this may take a minute)..." -ForegroundColor Cyan
+	Write-Host "Fetching all in stock products from BigCommerce (this may take a minute)..." -ForegroundColor Cyan
 
 	while ($hasNextPage) {
 		# If we have a cursor, we tell GraphQL where to start the next page
@@ -161,13 +162,14 @@ if ($selection -eq "1") {
 		}
 
 		# Final Report
-		Write-Host "`nComparison Complete!" -ForegroundColor Green
+		Write-Host "`nAudit Complete!" -ForegroundColor Green
 		Write-Host "Mismatches Found: $($mismatches.Count)"
-		Write-Host "SKUs in POS but missing in BC: $notFoundInBC"
+		
+		$outputFile = $outputFolderPath + "PriceMismatches" + $timestamp + ".csv"
 		
 		if ($mismatches.Count -gt 0) {
-			$mismatches | Sort-Object SKU | Export-Csv -Path $outputFolderPath + "PriceMismatches.csv" -NoTypeInformation
-			Write-Host "Results exported to Output\PriceMismatches.csv" -ForegroundColor Yellow
+			$mismatches | Sort-Object SKU | Export-Csv -Path $outputFile -NoTypeInformation
+			Write-Host "Results exported to $outputFile" -ForegroundColor Yellow
 		}
 	} catch {
 		Write-Host "SQL Error: $_" -ForegroundColor DarkRed
@@ -250,12 +252,16 @@ if ($selection -eq "1") {
 		}
 	}
 
+	Write-Host "Collected $($productCount) Products."
+	
 	# Final Report
 	Write-Host "`nAudit Complete!" -ForegroundColor Green
 	Write-Host "Products Found: $($allBcWeights.Count)"
-		
-	$allBcWeights | Where-Object {$_.weightValue -lt 1 } | Sort-Object SKU | Export-Csv -Path $outputFolderPath + "ProductWeights.csv" -NoTypeInformation
-	Write-Host "Results exported to Output\ProductWeights.csv" -ForegroundColor Yellow
+	
+	$outputFile = $outputFolderPath + "ProductWeights" + $timestamp + ".csv"
+	
+	$allBcWeights | Where-Object {$_.weightValue -lt 1 } | Sort-Object SKU | Export-Csv -Path $outputFile -NoTypeInformation
+	Write-Host "Results exported to $outputFile" -ForegroundColor Yellow
 } elseif ($selection -eq "3") {
 	$allBcProducts   = @{} # hash table of products, key is product code; value is inactive
 	$sqlFilePath = "$PSScriptRoot\Queries\GetInactiveCelerantProducts.sql"
@@ -320,11 +326,11 @@ if ($selection -eq "1") {
 		$endCursor   = $response.data.site.products.pageInfo.endCursor
 
 		if ($productCount % 500 -eq 0) {
-			Write-Host "Collected $($allBcProducts.Count) SKUs from $($productCount) Products so far..."
+			Write-Host "Collected $($productCount) Products so far..."
 		}
 	}
 
-	Write-Host "Total: Collected $($allBcProducts.Count) SKUs from $($productCount) Products."
+	Write-Host "Collected $($productCount) Products."
 
 	# Connect to Celerant Database
 	Write-Host "Connecting to Celerant Database and comparing prices..." -ForegroundColor Cyan
@@ -367,16 +373,134 @@ if ($selection -eq "1") {
 		}
 
 		# Final Report
-		Write-Host "`nComparison Complete!" -ForegroundColor Green
-		Write-Host "SKUs in POS but missing in BC: $notFoundInBC"
+		Write-Host "`nAudit Complete!" -ForegroundColor Green
+		
+		$outputFile = $outputFolderPath + "InactiveProducts" + $timestamp + ".csv"
 		
 		if ($allBcProducts.Count -gt 0) {
-			$allBcProducts.Values | Where-Object { $_.Inactive -eq $true } | Sort-Object SKU | Export-Csv -Path $outputFolderPath + "InactiveProducts.csv" -NoTypeInformation
-			Write-Host "Results exported to Output\InactiveProducts.csv" -ForegroundColor Yellow
+			$allBcProducts.Values | Where-Object { $_.Inactive -eq $true } | Sort-Object SKU | Export-Csv -Path $outputFile -NoTypeInformation
+			Write-Host "Results exported to $outputFile" -ForegroundColor Yellow
 		}
 	} catch {
 		Write-Host "SQL Error: $_" -ForegroundColor DarkRed
-	} 
+	}
+} elseif ($selection -eq "4") {
+	$InputFile = "Input\BigCommerceProducts.txt"
+	$ScriptBigCommerceProducts = "Queries\BigCommerceProducts.sql"
+	$ScriptProductsNotInBC     = "Queries\ProductsNotInBigCommerce.sql"
+	
+	if (Test-Path $InputFile) {
+		Write-Host "Reading products list from $InputFile..." -ForegroundColor Cyan
+		
+		# Clean data natively in memory: trim spaces, tabs, quotes, and remove empty rows
+		$CleanProducts = Get-Content -Path $InputFile | ForEach-Object {
+			# Strips out quotes, literal tabs, spaces, and trims ends
+			$_.Replace('"', '').Replace("`t", "").Replace(" ", "").Trim()
+		} | Where-Object { $_ -ne "" }
+		
+		Write-Host "Total products found in file: $($CleanProducts.Count)"
+		Write-Host "Fetching data from SQL Server..."
+		
+		$BatchSize   = 300
+		$MatchedSKUs = [System.Collections.Generic.List[string]]::new()
+		$BatchCount  = 0
+		
+		for ($i = 0; $i -lt $CleanProducts.Count; $i += $BatchSize) {
+			# Grab a clean array slice of up to 300 items
+			$BatchArray = $CleanProducts[$i..($i + $BatchSize - 1)] | Where-Object { $_ -ne $null }
+			
+			# Turn into a SQL-safe string format: 'prod1','prod2','prod3'
+			$ProductsParamString = ($BatchArray | ForEach-Object { "'$_'" }) -join ","
+
+			$BatchSqlParams = @{
+				ServerInstance         = $config.Celerant.ServerInstance
+				Database               = $config.Celerant.Database
+				Username               = $config.Celerant.Username
+				Password               = $config.Celerant.Password
+				InputFile              = $ScriptBigCommerceProducts
+				Variable               = @("Products=$ProductsParamString")
+				Encrypt                = "Mandatory"
+				TrustServerCertificate = $true
+			}
+			
+			# Run the command with our explicit hash table
+			$BatchResult = Invoke-Sqlcmd @BatchSqlParams
+
+			# Collect resulting StyleIDs/SKUs into our matched array list
+			if ($BatchResult) {
+				foreach ($Row in $BatchResult) {
+					# Drops values cleanly into memory (automatically avoids --- dashes or spacing issues)
+					if ($Row[0]) { $MatchedSKUs.Add("('$($Row[0])')") }
+				}
+			}
+
+			$BatchCount++
+			Write-Host "Processed batch $BatchCount..."
+		}
+		
+		if ($MatchedSKUs.Count -gt 0) {
+			Write-Host "Assembling unified SQL transaction in memory..." -ForegroundColor Cyan
+			
+			# We use a .NET StringBuilder to fast-track appending thousands of string components
+			$SqlScriptBuilder = [System.Text.StringBuilder]::new()
+
+			# Append the initial table creation configuration script block
+			[void]$SqlScriptBuilder.AppendLine("SET NOCOUNT ON;")
+			[void]$SqlScriptBuilder.AppendLine("IF OBJECT_ID('tempdb..##BigCommerceList') IS NOT NULL DROP TABLE ##BigCommerceList;")
+			[void]$SqlScriptBuilder.AppendLine("CREATE TABLE ##BigCommerceList (StyleID VARCHAR(255));")
+
+			# Dynamically loop and build all our multi-row INSERT queries straight into memory
+			for ($j = 0; $j -lt $MatchedSKUs.Count; $j += $BatchSize) {
+				$InsertSlice = $MatchedSKUs[$j..($j + $BatchSize - 1)] | Where-Object { $_ -ne $null }
+				
+				# Force clean and guarantee syntax safety ('Value') for every item
+				$ValuesString = ($InsertSlice | ForEach-Object {
+					$RawCode = $_.ToString().Replace("(", "").Replace(")", "").Replace("'", "").Trim()
+					"('$RawCode')"
+				}) -join ","
+				
+				# Append this batch line to our overall script sequence
+				[void]$SqlScriptBuilder.AppendLine("INSERT INTO ##BigCommerceList (StyleID) VALUES $ValuesString;")
+			}
+
+			# Append your final lookup query file directly to the very tail end of the transaction script
+			Write-Host "Appending final comparison query script payload..." -ForegroundColor Cyan
+			$FinalQueryText = Get-Content -Path $ScriptProductsNotInBC -Raw
+			[void]$SqlScriptBuilder.AppendLine($FinalQueryText)
+
+			# Base configuration parameters dictionary
+			$QuerySqlParams = @{
+				ServerInstance         = $config.Celerant.ServerInstance
+				Database               = $config.Celerant.Database
+				Username               = $config.Celerant.Username
+				Password               = $config.Celerant.Password
+				Query                  = $SqlScriptBuilder.ToString() # Hand over the whole unified script payload!
+				Encrypt                = "Mandatory"
+				TrustServerCertificate = $true
+				QueryTimeout           = 600                          # Gives large comparisons plenty of execution time
+			}
+
+			Write-Host "Executing transaction on SQL Server (This may take a moment)..." -ForegroundColor Yellow
+			
+			# Fire everything off at once! The table creation, population, and final SELECT all run in 1 session.
+			$FinalResults = Invoke-Sqlcmd @QuerySqlParams
+
+			$OutputFile  = "Output\ProductsNotInBigCommerce_" + $timestamp + ".csv"
+			
+			# Export data objects smoothly straight to your output destination
+			if ($FinalResults) {
+				Write-Host "`nAudit Complete!" -ForegroundColor Green
+				Write-Host "Products Found: $($FinalResults.Count)"
+	
+				$FinalResults | Export-Csv -Path $OutputFile -NoTypeInformation -Delimiter "," -Encoding utf8
+			} else {
+				Write-Warning "Comparison complete, but no missing products were found."
+			}
+
+		} else {
+			Write-Warning "No product codes matched your Celerant Database during processing."
+		}
+	}
 } else {
 	Write-Host "Exiting..." -ForegroundColor Cyan
 }
