@@ -32,7 +32,7 @@ Write-Host "What do you want to audit?" -ForegroundColor Cyan
 Write-Host "1. Price Mismatches" -ForegroundColor Cyan
 Write-Host "2. Product Weights" -ForegroundColor Cyan
 Write-Host "3. Inactivity Checker" -ForegroundColor Cyan
-Write-Host "4. Missing Products" -ForegroundColor Cyan
+Write-Host "4. Missing Products (Required: Input\BigCommerceProducts.txt)" -ForegroundColor Cyan
 Write-Host "5. Exit" -ForegroundColor Cyan
 $selection = Read-Host "Enter your selection"
 
@@ -333,7 +333,7 @@ if ($selection -eq "1") {
 	Write-Host "Collected $($productCount) Products."
 
 	# Connect to Celerant Database
-	Write-Host "Connecting to Celerant Database and comparing prices..." -ForegroundColor Cyan
+	Write-Host "Connecting to Celerant Database..." -ForegroundColor Cyan
 
 	# Set up SQL parameters
 	$sqlParams = @{
@@ -348,6 +348,8 @@ if ($selection -eq "1") {
 
 	try {
 		$posData = Invoke-Sqlcmd @sqlParams
+		
+		Write-Host "Processing data..." -ForegroundColor Cyan
 		
 		$notFoundInBC = 0
 		$foundInBC = 0
