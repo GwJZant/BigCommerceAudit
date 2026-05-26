@@ -70,11 +70,7 @@ HOW TO USE INACTIVITY CHECKER:
 4. It should be noted I am not entirely confident in the completeness of any query we get from GraphQL given my attempt at a robust dataset from the Price Mismatches function. The collection of data may actually be fine since I am not trying to pull variant-level info which is where I had problems under Price Mismatches. Just keep in mind you're always able to just look at what the tool outputs as total SKUs processed and compare that against what BigCommerce says our product total is. Whatever that difference is is how many products didn't get picked up by the GraphQL query.
 
 HOW TO RUN:
-Right-click BigCommerceAudit.ps1 and select "Run with PowerShell"
-
-Alternatively, Shift + Right-click anywhere in the folder (don't Shift + Right-click the file itself) and select "Open PowerShell window here" to open a PowerShell window first. This will make it so the command prompt window won't close as soon as this tool finishes which will let you inspect the output if you wish. To run the script with this method, type (or copy and paste) the following:
-
-./BigCommerceAudit.ps1
+Double-click BigCommerceAudit.bat
 
 HOW TO INSTALL MODULES:
 Open PowerShell by searching for it with the Start menu or shift + right-click the whitespace of any folder's window and click "Open PowerShell window here"

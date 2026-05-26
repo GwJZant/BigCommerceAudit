@@ -310,11 +310,12 @@ if ($selection -eq "1") {
 			
 			if ($p.sku) {
 				$allBcProducts[$p.sku] = [PSCustomObject]@{
-						Entity      = $p.entityId
-						SKU         = $p.sku
-						Name        = $p.name
-						inStock     = $p.inventory.isInStock
-						Inactive    = $false
+						Entity          = $p.entityId
+						SKU             = $p.sku
+						Name            = $p.name
+						inStock         = $p.inventory.isInStock
+						Inactive        = $false
+						Has_Dupe_Styles = 'N'
 					}	
 			} else {
 				# Write-Host "No SKU from entity: $($p.entityId)"
@@ -360,6 +361,7 @@ if ($selection -eq "1") {
 			$dept        = $row.Dept
 			$season      = $row.Season
 			$inactive    = $row.Inactive
+			$dupeStyles  = $row.'Has_Dupe_Styles'
 			
 			if ([string]::IsNullOrWhiteSpace($style)) {
 				continue
@@ -369,6 +371,7 @@ if ($selection -eq "1") {
 				$foundInBC++
 				
 				$allBcProducts[$style].Inactive = $true
+				$allBcProducts[$style].Has_Dupe_Styles = $dupeStyles
 			} else {
 				$notFoundInBC++
 			}
