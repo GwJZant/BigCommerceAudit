@@ -510,7 +510,7 @@ if ($selection -eq "1") {
 } elseif ($selection -eq "5") {
 	$allBcPrices = [System.Collections.Generic.List[PSCustomObject]]::new()
 	
-	Write-Host "Fetching all in stock products from BigCommerce (this may take a minute)..." -ForegroundColor Cyan
+	Write-Host "Fetching ALL products from BigCommerce (this may take a minute)..." -ForegroundColor Cyan
 
 	while ($hasNextPage) {
 		# If we have a cursor, we tell GraphQL where to start the next page
