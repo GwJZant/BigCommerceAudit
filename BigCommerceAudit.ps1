@@ -33,7 +33,8 @@ Write-Host "1. Price Mismatches" -ForegroundColor Cyan
 Write-Host "2. Product Weights" -ForegroundColor Cyan
 Write-Host "3. Inactivity Checker" -ForegroundColor Cyan
 Write-Host "4. Missing Products (Required: Input\BigCommerceProducts.txt)" -ForegroundColor Cyan
-Write-Host "5. Exit" -ForegroundColor Cyan
+Write-Host "5. Full Price List" -ForegroundColor Cyan
+Write-Host "6. Exit" -ForegroundColor Cyan
 $selection = Read-Host "Enter your selection"
 
 if ($selection -eq "1") {
@@ -505,6 +506,85 @@ if ($selection -eq "1") {
 		} else {
 			Write-Warning "No product codes matched your Celerant Database during processing."
 		}
+	}
+} elseif ($selection -eq "5") {
+	$allBcPrices = [System.Collections.Generic.List[PSCustomObject]]::new()
+	
+	Write-Host "Fetching all in stock products from BigCommerce (this may take a minute)..." -ForegroundColor Cyan
+
+	while ($hasNextPage) {
+		# If we have a cursor, we tell GraphQL where to start the next page
+		$after = if ($endCursor) { "after: `"$endCursor`"" } else { "" }
+		
+		# 2. Define the GraphQL Query
+		# This asks for 50 products, their SKU, and their current price
+		$graphQuery = @{
+			query = "query {
+				site {
+					products (first: 50 $after) {
+						pageInfo { hasNextPage endCursor }
+						edges {
+							node {
+								entityId
+								sku
+								prices {
+									price {
+										value
+									}
+								}
+							}
+						}
+					}
+				}
+			}"
+		} | ConvertTo-Json
+		
+		$headers = @{
+			"Authorization" = "Bearer $token"
+			"Content-Type"  = "application/json"
+		}
+
+		$response = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $graphQuery
+		
+		# Write-Host "Debug: hasNextPage = $($response.data.site.products.pageInfo.hasNextPage) | Cursor = $($response.data.site.products.pageInfo.endCursor)"
+
+		# Drill down into the data
+		$bcProducts = $response.data.site.products.edges
+
+		foreach ($productEdge in $bcProducts) {
+			$p = $productEdge.node
+			$productCount++
+			
+			if ($p.sku) {
+				$allBcPrices.Add([PSCustomObject]@{
+					SKU   = $p.sku
+					Price = [decimal]$($p.prices.price.value)
+				})
+				# $allBcPrices[$p.sku] = [decimal]$($p.prices.price.value)
+			} else {
+				# Write-Host "No SKU from entity: $($p.entityId) Price: $($p.prices.price.value)"
+			}			
+		}
+		
+		# Check if there's another page
+		$hasNextPage = $response.data.site.products.pageInfo.hasNextPage
+		$endCursor   = $response.data.site.products.pageInfo.endCursor
+
+		if ($productCount % 500 -eq 0) {
+			Write-Host "Collected $($allBcPrices.Count) SKUs from $($productCount) Products so far..."
+		}
+	}
+
+	Write-Host "Total: Collected $($allBcPrices.Count) SKUs from $($productCount) Products."
+
+	# Final Report
+	Write-Host "`nAudit Complete!" -ForegroundColor Green
+	
+	$outputFile = $outputFolderPath + "PriceList" + $timestamp + ".csv"
+	
+	if ($allBcPrices.Count -gt 0) {
+		$allBcPrices | Export-Csv -Path $outputFile -NoTypeInformation
+		Write-Host "Results exported to $outputFile" -ForegroundColor Yellow
 	}
 } else {
 	Write-Host "Exiting..." -ForegroundColor Cyan
