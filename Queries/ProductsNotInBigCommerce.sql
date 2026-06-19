@@ -13,6 +13,7 @@ SELECT  [outer].[MKT GROUP],
 		[outer].[Retail Price],
 		[outer].[SEASON],
 		[outer].[First Rcvd],
+		[outer].[Available],
 		[outer].[Added],
 		[outer].[Needs Description],
 		[outer].[Needs Photo],
@@ -28,6 +29,7 @@ FROM
 		CAST(vw.PRICE AS VARCHAR) AS [Retail Price], 
 		vw.OF1 AS [SEASON], 
 		ISNULL(CONVERT(VARCHAR(25), vw.FIRST_RCVD, 101), '########') AS [First Rcvd],
+		SUM(vw.QOH) AS [Available],
 		'' AS [Added],
 		'' AS [Needs Description],
 		'' AS [Needs Photo],
@@ -38,6 +40,6 @@ AND vw.OF1 NOT IN ('NSTOCK', 'DISCO', 'SO', '')
 AND vw.DEPT NOT LIKE '%IMPULSE%'
 AND EXISTS (SELECT styles.STATUS_FINISH FROM TB_STYLES AS styles WHERE styles.STYLE = vw.STYLE AND styles.STATUS_FINISH = 'N' AND styles.DESCRIPTION = vw.DESCRIPTION)
 GROUP BY vw.OF2, vw.DEPT, vw.TYP, vw.SUBTYP_1, vw.BRAND, vw.STYLE, vw.DESCRIPTION, vw.PRICE, vw.OF1, vw.FIRST_RCVD
-HAVING SUM(vw.QOH) > 0
+--HAVING SUM(vw.QOH) > 0
 ORDER BY [BRAND], [SEASON], [PRODUCT] OFFSET 0 ROWS) AS [outer];
 

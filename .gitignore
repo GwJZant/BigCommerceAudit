@@ -6,3 +6,4 @@ BigCommerceInactiveProducts.csv
 Output/
 Input/*.txt
 !Input/BigCommerceProductsSample.txt
+Debug_GeneratedQuery.sql

@@ -473,6 +473,8 @@ if ($selection -eq "1") {
 			Write-Host "Appending final comparison query script payload..." -ForegroundColor Cyan
 			$FinalQueryText = Get-Content -Path $ScriptProductsNotInBC -Raw
 			[void]$SqlScriptBuilder.AppendLine($FinalQueryText)
+			
+			$SqlScriptBuilder.ToString() | Out-File -FilePath "Debug_GeneratedQuery.sql" -Encoding utf8
 
 			# Base configuration parameters dictionary
 			$QuerySqlParams = @{
