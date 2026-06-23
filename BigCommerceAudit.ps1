@@ -288,6 +288,13 @@ if ($selection -eq "1") {
 									isInStock
 								}
 								sku
+								categories {
+									edges {
+										node {
+											entityId
+										}
+									}
+								}
 							}
 						}
 					}
@@ -309,14 +316,19 @@ if ($selection -eq "1") {
 			$p = $productEdge.node
 			$productCount++
 			
+			$categoryIds = ($p.categories.edges.node.entityId) -join ';'
+			
 			if ($p.sku) {
 				$allBcProducts[$p.sku] = [PSCustomObject]@{
-						Entity          = $p.entityId
-						SKU             = $p.sku
-						Name            = $p.name
-						inStock         = $p.inventory.isInStock
-						Inactive        = $false
-						Has_Dupe_Styles = 'N'
+						Item              = 'Product'
+						ID                = $p.entityId
+						Name              = $p.name
+						Categories        = $categoryIds
+						'Is Visible'      = 'FALSE'
+						SKU               = $p.sku
+						inStock           = $p.inventory.isInStock
+						Inactive          = $false
+						Has_Dupe_Styles   = 'N'
 					}	
 			} else {
 				# Write-Host "No SKU from entity: $($p.entityId)"
