@@ -34,7 +34,8 @@ Write-Host "2. Product Weights" -ForegroundColor Cyan
 Write-Host "3. Inactivity Checker" -ForegroundColor Cyan
 Write-Host "4. Missing Products (Required: Input\BigCommerceProducts.txt)" -ForegroundColor Cyan
 Write-Host "5. Full Price List" -ForegroundColor Cyan
-Write-Host "6. Exit" -ForegroundColor Cyan
+Write-Host "6. Generate import to fix categories" -ForegroundColor Cyan
+Write-Host "7. Exit" -ForegroundColor Cyan
 $selection = Read-Host "Enter your selection"
 
 if ($selection -eq "1") {
@@ -600,6 +601,198 @@ if ($selection -eq "1") {
 		$allBcPrices | Export-Csv -Path $outputFile -NoTypeInformation
 		Write-Host "Results exported to $outputFile" -ForegroundColor Yellow
 	}
+} elseif ($selection -eq "6") {
+	$allBcProducts   = @{} # hash table of products, key is product code; value is inactive
+	
+	Write-Host "NOTE: Categories that are not visible will be removed. Make sure any categories you wish to preserve assignments for are visible." -ForegroundColor Yellow
+	Write-Host "Fetching all products from BigCommerce (this may take a minute)..." -ForegroundColor Cyan
+
+	while ($hasNextPage) {
+		# If we have a cursor, we tell GraphQL where to start the next page
+		$after = if ($endCursor) { "after: `"$endCursor`"" } else { "" }
+		
+		# 2. Define the GraphQL Query
+		# This asks for 50 products and their SKU
+		$graphQuery = @{
+			query = "query {
+				site {
+					products (first: 50 $after) {
+						pageInfo { hasNextPage endCursor }
+						edges {
+							node {
+								entityId
+								name
+								sku
+								categories {
+									edges {
+										node {
+											entityId
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}"
+		} | ConvertTo-Json
+		
+		$headers = @{
+			"Authorization" = "Bearer $token"
+			"Content-Type"  = "application/json"
+		}
+
+		$response = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $graphQuery
+		
+		# Drill down into the data
+		$bcProducts = $response.data.site.products.edges
+
+		foreach ($productEdge in $bcProducts) {
+			$p = $productEdge.node
+			$productCount++
+			
+			$categoryIds = ($p.categories.edges.node.entityId) -join ';'
+			
+			if ($p.sku) {
+				$allBcProducts[$p.sku] = [PSCustomObject]@{
+						Item              = 'Product'
+						ID                = $p.entityId
+						Name              = $p.name
+						Categories        = $categoryIds
+						SKU               = $p.sku
+						Requires_Review = 'FALSE' # Flag for missing/deep categories
+					}	
+			} else {
+				# Write-Host "No SKU from entity: $($p.entityId)"
+			}			
+		}
+		
+		# Check if there's another page
+		$hasNextPage = $response.data.site.products.pageInfo.hasNextPage
+		$endCursor   = $response.data.site.products.pageInfo.endCursor
+
+		if ($productCount % 500 -eq 0) {
+			Write-Host "Collected $($productCount) Products so far..."
+		}
+	}
+
+	Write-Host "Collected $($productCount) Products."
+	
+	Write-Host "Fetching and flattening category tree..." -ForegroundColor Cyan
+	
+	$graphQuery = @{
+			query = "query CategoryTree3LevelsDeep {
+			  site {
+				categoryTree {
+				  ...CategoryFields
+				  children {
+					...CategoryFields
+					children {
+					  ...CategoryFields
+					  children {
+						...CategoryFields
+					  }
+					}
+				  }
+				}
+			  }
+			}
+
+			fragment CategoryFields on CategoryTreeItem {
+			  name
+			  path
+			  entityId
+			}"
+		} | ConvertTo-Json
+		
+	$headers = @{
+		"Authorization" = "Bearer $token"
+		"Content-Type"  = "application/json"
+	}
+
+	$responseMap = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $graphQuery
+	$rootCategories = $responseMap.data.site.categoryTree
+
+	# Build a lookup map: Key = Category ID, Value = Array of Self + All Parent IDs
+	$categoryParentMap = @{}
+
+	foreach ($lvl1 in $rootCategories) {
+		$categoryParentMap[$lvl1.entityId] = @($lvl1.entityId)
+		
+		foreach ($lvl2 in $lvl1.children) {
+			$categoryParentMap[$lvl2.entityId] = @($lvl1.entityId, $lvl2.entityId)
+			
+			foreach ($lvl3 in $lvl2.children) {
+				$categoryParentMap[$lvl3.entityId] = @($lvl1.entityId, $lvl2.entityId, $lvl3.entityId)
+				
+				foreach ($lvl4 in $lvl3.children) {
+					$categoryParentMap[$lvl4.entityId] = @($lvl1.entityId, $lvl2.entityId, $lvl3.entityId, $lvl4.entityId)
+				}
+			}
+		}
+	}
+	
+	# -----------------------------------------------------------------
+	# Process Products: Expand Category Strings & Check for Hidden Deep Categories
+	# -----------------------------------------------------------------
+	Write-Host "Expanding category hierarchies for products..." -ForegroundColor Cyan
+
+	foreach ($sku in $allBcProducts.Keys) {
+		$product = $allBcProducts[$sku]
+		# Use a generic string list to prevent any casting errors
+		$expandedCategories = [System.Collections.Generic.List[string]]::new()
+		$hasUnmappedCategory = $false
+
+		# Handle both raw arrays and pre-joined strings by splitting on semicolons
+		$currentCategories = @()
+		foreach ($item in $product.Categories) {
+			if ($item -match ';') {
+				$currentCategories += $item -split ';'
+			} else {
+				$currentCategories += $item
+			}
+		}
+
+		foreach ($catId in $currentCategories) {
+			# Cast to string safely for comparison
+			$catIdStr = $catId.ToString().Trim()
+			if ([string]::IsNullOrWhitespace($catIdStr)) { continue }
+
+			if ($categoryParentMap.ContainsKey([int]$catIdStr)) {
+				# Add all parents and the category itself
+				foreach ($ancestorId in $categoryParentMap[[int]$catIdStr]) {
+					$ancestorIdStr = $ancestorId.ToString()
+					if (-not $expandedCategories.Contains($ancestorIdStr)) {
+						$expandedCategories.Add($ancestorIdStr)
+					}
+				}
+			} else {
+				# Category ID wasn't found in our 4-level deep map! 
+				$hasUnmappedCategory = $true
+				if (-not $expandedCategories.Contains($catIdStr)) {
+					$expandedCategories.Add($catIdStr)
+				}
+			}
+		}
+
+		# Convert the list back to your requested semicolon-separated string
+		$product.Categories = $expandedCategories -join ';'
+
+		if ($hasUnmappedCategory) {
+			$product.Requires_Review = 'TRUE'
+		}
+	}
+	
+	$outputFile = $outputFolderPath + "CategoryImport" + $timestamp + ".csv"
+	
+	if ($allBcProducts.Count -gt 0) {
+		$allBcProducts.Values | Export-Csv -Path $outputFile -NoTypeInformation -Encoding UTF8
+		Write-Host "Results exported to $outputFile" -ForegroundColor Yellow
+	}
+
+	Write-Host "Done!" -ForegroundColor Green
+	
+	Write-Host "Exiting..." -ForegroundColor Cyan
 } else {
 	Write-Host "Exiting..." -ForegroundColor Cyan
 }
